@@ -1,0 +1,5 @@
+{
+    "files.associations": {
+        "nuklear_glfw_vulkan.h": "c"
+    }
+}
