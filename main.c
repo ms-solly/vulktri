@@ -618,8 +618,8 @@ int main() {
     };
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    // change to 4 to get rectangle
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    // Draw full rectangle (4 vertices) instead of triangle (3 vertices)
+    vkCmdDraw(commandBuffer, 4, 1, 0, 0);
     // nk_glfw3_render(queue, imageIndex, renderCompleteSemaphore, NK_ANTI_ALIASING_ON);
     // end the render pass
     vkCmdEndRenderPass(commandBuffer);
