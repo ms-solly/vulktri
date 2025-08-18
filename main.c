@@ -20,6 +20,14 @@
 #define ARRAYSIZE(array) (sizeof(array) / sizeof((array)[0]))
 #endif
 
+// Global variables for resize handling
+static bool framebufferResized = false;
+
+// Callback for window resize
+static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+    framebufferResized = true;
+}
+
 //-------------------  gui  ----------------- 
 //flags 
 #define NK_INCLUDE_FIXED_TYPES
@@ -51,6 +59,7 @@ int main() {
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   GLFWwindow *window = glfwCreateWindow(800, 600, "niagara", 0, 0);
   assert(window);
+  glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
   int windowWidth = 0, windowHeight = 0;
   glfwGetWindowSize(window, &windowWidth, &windowHeight);
   VkApplicationInfo appInfo = {
@@ -286,7 +295,7 @@ int main() {
                                &uiImageViews[i]));
   }
 
-  VkFramebuffer framebuffers[swapchainimageCount];
+  VkFramebuffer *framebuffers = malloc(swapchainimageCount * sizeof(VkFramebuffer));
   for (u32 i = 0; i < swapchainimageCount; ++i) {
     VkImageView attachments[1] = {swapchainImageViews[i]};
     VkFramebufferCreateInfo framebufferInfo = {
@@ -444,6 +453,107 @@ int main() {
 
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
+    
+    // Handle window resize
+    if (framebufferResized) {
+      framebufferResized = false;
+      
+      // Wait for device to be idle
+      vkDeviceWaitIdle(device);
+      
+      // Get new window size
+      glfwGetWindowSize(window, &windowWidth, &windowHeight);
+      
+      // Skip if minimized
+      if (windowWidth == 0 || windowHeight == 0) {
+        continue;
+      }
+      
+      // Cleanup old resources
+      for (uint32_t i = 0; i < swapchainimageCount; ++i) {
+        vkDestroyFramebuffer(device, framebuffers[i], 0);
+        vkDestroyImageView(device, swapchainImageViews[i], 0);
+        vkDestroyImageView(device, uiImageViews[i], 0);
+      }
+      vkDestroySwapchainKHR(device, swapchain, 0);
+      
+      // Recreate swapchain with new size
+      swapchaincreateinfo.imageExtent.width = windowWidth;
+      swapchaincreateinfo.imageExtent.height = windowHeight;
+      VK_CHECK(vkCreateSwapchainKHR(device, &swapchaincreateinfo, 0, &swapchain));
+      
+      // Recreate swapchain images and views
+      VK_CHECK(vkGetSwapchainImagesKHR(device, swapchain, &swapchainimageCount, NULL));
+      swapchainImages = realloc(swapchainImages, swapchainimageCount * sizeof(VkImage));
+      VK_CHECK(vkGetSwapchainImagesKHR(device, swapchain, &swapchainimageCount, swapchainImages));
+      
+      swapchainImageViews = realloc(swapchainImageViews, swapchainimageCount * sizeof(VkImageView));
+      uiImageViews = realloc(uiImageViews, swapchainimageCount * sizeof(VkImageView));
+      
+      for (u32 i = 0; i < swapchainimageCount; ++i) {
+        VkImageViewCreateInfo imageViewInfo = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = swapchainImages[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = swapchaincreateinfo.imageFormat,
+            .components = {
+                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+            },
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        VK_CHECK(vkCreateImageView(device, &imageViewInfo, NULL, &swapchainImageViews[i]));
+        
+        VkImageViewCreateInfo uiViewInfo = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = swapchainImages[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = swapchaincreateinfo.imageFormat,
+            .components = {
+                .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+                .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+            },
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+        };
+        VK_CHECK(vkCreateImageView(device, &uiViewInfo, NULL, &uiImageViews[i]));
+      }
+      
+      // Recreate framebuffers
+      framebuffers = realloc(framebuffers, swapchainimageCount * sizeof(VkFramebuffer));
+      for (u32 i = 0; i < swapchainimageCount; ++i) {
+        VkImageView attachments[1] = {swapchainImageViews[i]};
+        VkFramebufferCreateInfo framebufferInfo = {
+            .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+            .renderPass = renderPass,
+            .attachmentCount = ARRAYSIZE(attachments),
+            .pAttachments = attachments,
+            .width = windowWidth,
+            .height = windowHeight,
+            .layers = 1,
+        };
+        VK_CHECK(vkCreateFramebuffer(device, &framebufferInfo, NULL, &framebuffers[i]));
+      }
+      
+      // Notify nuklear about resize
+      nk_glfw3_resize(windowWidth, windowHeight);
+    }
+    
     nk_glfw3_new_frame();
 
     if (nk_begin(ctx, "Demo", nk_rect(50, 50, 200, 200),
@@ -459,9 +569,15 @@ int main() {
 
     u32 imageIndex = 0;
 
-    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, ~0ull,
-                                   imageAvailableSemaphore, VK_NULL_HANDLE,
-                                   &imageIndex));
+    VkResult result = vkAcquireNextImageKHR(device, swapchain, ~0ull,
+                                           imageAvailableSemaphore, VK_NULL_HANDLE,
+                                           &imageIndex);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+      framebufferResized = true;
+      continue;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+      assert(false && "Failed to acquire swapchain image");
+    }
     VK_CHECK(vkResetCommandPool(device, commandpool, 0));
     VkCommandBufferAllocateInfo commandBufferInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -502,8 +618,8 @@ int main() {
     };
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    // change to 4 to get rectangle
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    // Draw full rectangle (4 vertices) instead of triangle (3 vertices)
+    vkCmdDraw(commandBuffer, 4, 1, 0, 0);
     // nk_glfw3_render(queue, imageIndex, renderCompleteSemaphore, NK_ANTI_ALIASING_ON);
     // end the render pass
     vkCmdEndRenderPass(commandBuffer);
@@ -539,7 +655,12 @@ int main() {
         .pSwapchains = &swapchain,
         .pImageIndices = &imageIndex,
     };
-    VK_CHECK(vkQueuePresentKHR(queue, &presentInfo));
+    result = vkQueuePresentKHR(queue, &presentInfo);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+      framebufferResized = true;
+    } else if (result != VK_SUCCESS) {
+      assert(false && "Failed to present swapchain image");
+    }
     // VK_CHECK(vkDeviceWaitIdle(device));
 
   }
@@ -564,6 +685,13 @@ vkDestroySemaphore(device, imageAvailableSemaphore, 0);
   vkDestroySwapchainKHR(device, swapchain, 0);
   vkDestroySurfaceKHR(instance, surface, 0);
   glfwDestroyWindow(window);
+  
+  // Free allocated arrays
+  free(swapchainImages);
+  free(swapchainImageViews);
+  free(uiImageViews);
+  free(framebuffers);
+  
   vkDestroyDevice(device, 0);
   vkDestroyInstance(instance, 0);
   return 0;
