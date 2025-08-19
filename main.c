@@ -556,9 +556,10 @@ int main() {
     
     nk_glfw3_new_frame();
 
-    if (nk_begin(ctx, "Demo", nk_rect(50, 50, 200, 200),
-                 NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-                     NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE)) {
+nk_flags windowFlags = NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+    NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE;		
+
+    if (nk_begin(ctx, "bad code", nk_rect(50, 50, 200, 200),windowFlags) ){
       if (nk_button_label(ctx, "Change Color")) {
         r = (float)rand() / (float)RAND_MAX;
         g = (float)rand() / (float)RAND_MAX;
@@ -616,7 +617,7 @@ int main() {
         .offset = {0, 0},
         .extent = {windowWidth, windowHeight},
     };
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+    vkCmdSetScissor(commandBuffer, 0, 2, &scissor);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     // Draw full rectangle (4 vertices) instead of triangle (3 vertices)
     vkCmdDraw(commandBuffer, 4, 1, 0, 0);
