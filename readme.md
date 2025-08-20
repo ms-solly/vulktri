@@ -1,1 +1,5 @@
-c99 vulkan triangle , without any abstraction in procedural style for easy to understand code 
+c99 vulkan triangle , without any abstraction in procedural style for easy to understand code
+
+## keymaps : 
+
+- N : hide/unhide gui window
