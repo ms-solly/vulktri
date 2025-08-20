@@ -11,7 +11,7 @@
 #define NK_IMPLEMENTATION
 #define NK_GLFW_VULKAN_IMPLEMENTATION
 
-#include "ext/nuklear/nuklear.h"
+#include "ext/Nuklear/nuklear.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>

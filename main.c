@@ -22,10 +22,18 @@
 
 // Global variables for resize handling
 static bool framebufferResized = false;
+static bool show_gui = true;
+
 
 // Callback for window resize
 static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
     framebufferResized = true;
+}
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    if (key == GLFW_KEY_N && action == GLFW_PRESS) {
+        show_gui = !show_gui;
+    }
 }
 
 //-------------------  gui  ----------------- 
@@ -60,6 +68,8 @@ int main() {
   GLFWwindow *window = glfwCreateWindow(800, 600, "niagara", 0, 0);
   assert(window);
   glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+  glfwSetKeyCallback(window, key_callback);
+
   int windowWidth = 0, windowHeight = 0;
   glfwGetWindowSize(window, &windowWidth, &windowHeight);
   VkApplicationInfo appInfo = {
@@ -209,13 +219,14 @@ int main() {
       {
           .format = swapchaincreateinfo.imageFormat,
           .samples = VK_SAMPLE_COUNT_1_BIT,
-          .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+          .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
           .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
           .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
           .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-          .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+          .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
           .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
       },
+
   };
   VkAttachmentReference colorAttachments = {
       .attachment = 0,
@@ -437,7 +448,7 @@ int main() {
   ctx = nk_glfw3_init(window, device, selectedPhysicalDevice, queuefamilyIndex,
                       uiImageViews, swapchainimageCount,
                       swapchaincreateinfo.imageFormat,
-                      NK_GLFW3_INSTALL_CALLBACKS, MAX_VERTEX_BUFFER,
+                      0, MAX_VERTEX_BUFFER,
                       MAX_ELEMENT_BUFFER);
   {
     struct nk_font_atlas *atlas;
@@ -556,17 +567,23 @@ int main() {
     
     nk_glfw3_new_frame();
 
-nk_flags windowFlags = NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
-    NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE;		
+   if (show_gui) {
+        nk_flags windowFlags = NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+            NK_WINDOW_CLOSABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE;
 
-    if (nk_begin(ctx, "bad code", nk_rect(50, 50, 200, 200),windowFlags) ){
-      if (nk_button_label(ctx, "Change Color")) {
-        r = (float)rand() / (float)RAND_MAX;
-        g = (float)rand() / (float)RAND_MAX;
-        b = (float)rand() / (float)RAND_MAX;
-      }
+        if (nk_begin(ctx, "bad code", nk_rect(50, 50, 200, 200), windowFlags)) {
+            if (nk_button_label(ctx, "Change Color")) {
+                r = (float)rand() / (float)RAND_MAX;
+                g = (float)rand() / (float)RAND_MAX;
+                b = (float)rand() / (float)RAND_MAX;
+            }
+        } else {
+            // The window was closed by the user, so hide it
+            show_gui = false;
+        }
+        nk_end(ctx);
     }
-    nk_end(ctx);
+
 
     u32 imageIndex = 0;
 
