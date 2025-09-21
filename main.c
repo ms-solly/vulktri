@@ -42,8 +42,8 @@ void init_vulkan(App *pApp);
 void main_loop(App *pApp);
 void cleanup(App *pApp);
 
-void create_instance(App *pApp);
-
+VkInstance create_instance(App *pApp);
+VkSurfaceKHR create_surface(App *pApp);
 
 int main() {
 	 App app = {0};
@@ -68,7 +68,8 @@ void init_window(App *pApp){
 
 }
 
-void create_instance(App *pApp){
+VkInstance create_instance(App *pApp){
+	VkInstance instance;
 	VkApplicationInfo app_info = {
 		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		.pApplicationName = "Hello Triangle",
@@ -107,17 +108,45 @@ void create_instance(App *pApp){
 		.enabledLayerCount = 0,
 
 	};
-	VK_CHECK(vkCreateInstance(&create_info, NULL, &pApp->instance));
+	VK_CHECK(vkCreateInstance(&create_info, NULL, &instance));
 
         #ifndef NDEBUG
 	free(all_exts);
         #endif
 
-VK_CHECK(glfwCreateWindowSurface(pApp->instance, pApp->window, NULL, &pApp->surface));
+	return instance;	
+}
+
+VkSurfaceKHR create_surface(App *pApp){
+	VkSurfaceKHR surface;
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+	VkWaylandSurfaceCreateInfoKHR surfacecreateInfo = {
+	    .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
+	    .display = glfwGetWaylandDisplay(),
+	    .surface = glfwGetWaylandWindow(pApp->window),
+	};
+	VK_CHECK(vkCreateWaylandSurfaceKHR(pApp->instance, &surfacecreateInfo, 0, &surface));
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+	VkXlibSurfaceCreateInfoKHR surfacecreateInfo = {
+	    .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+	    .dpy = glfwGetX11Display(),
+	    .window = glfwGetX11Window(pApp->window),
+	};
+	VK_CHECK(vkCreateXlibSurfaceKHR(pApp->instance, &surfacecreateInfo, 0, &surface));
+#else
+	fprintf(stderr, "No supported platform defined for Vulkan surface creation\n");
+	exit(1);
+#endif
+
+// VK_CHECK(glfwCreateWindowSurface(pApp->instance, pApp->window, NULL, &pApp->surface));
+	
+	return surface;
+
 	
 }
 void init_vulkan(App *pApp){
-	create_instance(pApp);
+	pApp->instance = create_instance(pApp);
+	pApp->surface  = create_surface(pApp);
 
 }
 void main_loop(App *pApp){
