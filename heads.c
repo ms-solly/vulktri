@@ -3,13 +3,15 @@
 #include <stdint.h>//dt 
 #include <stdio.h>// ip/op 
 #include <stdlib.h>// 
+#include <string.h>
 // api headers
-#include <vulkan/vulkan.h>
+//#include <vulkan/vulkan.h>
+
 #include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_wayland.h>
 // window creation
-// #define GLFW_INCLUDE_VULKAN
-// #define GLFW_EXPOSE_NATIVE_WAYLAND
+#define GLFW_INCLUDE_VULKAN
+#define GLFW_EXPOSE_NATIVE_WAYLAND
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 // gui headers
@@ -26,5 +28,7 @@
 #define NK_IMPLEMENTATION
 #define NK_GLFW_VULKAN_IMPLEMENTATION
 */
-#include "ext/Nuklear/nuklear.h"
-#include "ext/Nuklear/demo/glfw_vulkan/nuklear_glfw_vulkan.h"
+
+//#include "ext/Nuklear/nuklear.h"
+
+//#include "ext/Nuklear/demo/glfw_vulkan/nuklear_glfw_vulkan.h"
