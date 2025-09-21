@@ -83,6 +83,7 @@ void init_window(App *pApp){
 		printf("windpw created");
 	}
 	assert(pApp->window);
+    glfwGetWindowSize(pApp->window, &pApp->width, &pApp->height);
 
 }
 
@@ -295,13 +296,30 @@ VkSwapchainKHR create_swapchain(App *pApp){
 	VkSurfaceCapabilitiesKHR surface_capabilities;
 	VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
 	    pApp->gpu_device, pApp->surface, &surface_capabilities));
+
+    u32 format_count = 0;
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(pApp->gpu_device, pApp->surface, &format_count, 0));
+    VkSurfaceFormatKHR *formats = malloc(format_count * sizeof(VkSurfaceFormatKHR));
+    VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(pApp->gpu_device, pApp->surface, &format_count, formats));
+
+    pApp->swapchain_format = formats[0].format;
+    pApp->swapchain_color_space = formats[0].colorSpace;
+    for(u32 i = 0; i< format_count; ++i){
+        if(formats[i].format == VK_FORMAT_B8G8R8A8_UNORM && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR){
+            pApp->swapchain_format = formats[i].format;
+            pApp->swapchain_color_space = formats[i].colorSpace;
+            break;
+        }
+    }
+    free(formats);
+
 	VkSwapchainCreateInfoKHR swapchain_info = {
 	    .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
 	    .surface = pApp->surface,
 	    .minImageCount = surface_capabilities.minImageCount,
 	    .imageFormat = pApp->swapchain_format,
 	    .imageColorSpace = pApp->swapchain_color_space,
-	    .imageExtent = {.width = pApp->width, .height = pApp->height},
+	    .imageExtent = surface_capabilities.currentExtent.width != UINT32_MAX ? surface_capabilities.currentExtent : (VkExtent2D){pApp->width, pApp->height},
 	    .imageArrayLayers = 1,
 	    .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 	    .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
