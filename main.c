@@ -1,6 +1,6 @@
 // flags
-//#define GLFW_INCLUDE_VULKAN
-//#define GLFW_EXPOSE_NATIVE_WAYLAND
+#define GLFW_INCLUDE_VULKAN
+#define GLFW_EXPOSE_NATIVE_WAYLAND
 
 /*
 #define NK_INCLUDE_FIXED_TYPES
@@ -33,7 +33,7 @@ const uint32_t WIN_HEIGHT = 600;
 typedef struct App {
 	GLFWwindow *window;
 	VkInstance instance;
-	VkSurfaceKHR  *surface;
+	VkSurfaceKHR  surface;
 
 } App;
 
@@ -113,7 +113,7 @@ void create_instance(App *pApp){
 	free(all_exts);
         #endif
 
-VK_CHECK(glfwCreateWindowSurface(pApp->instance, pApp->window, NULL, pApp->surface));
+VK_CHECK(glfwCreateWindowSurface(pApp->instance, pApp->window, NULL, &pApp->surface));
 	
 }
 void init_vulkan(App *pApp){
