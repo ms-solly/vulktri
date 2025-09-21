@@ -44,6 +44,7 @@ void cleanup(App *pApp);
 
 VkInstance create_instance(App *pApp);
 VkSurfaceKHR create_surface(App *pApp);
+VkPhysicalDevice select_gpu_device(VkInstance instance);
 
 int main() {
 	 App app = {0};
@@ -65,6 +66,7 @@ void init_window(App *pApp){
 	if(pApp->window){
 		printf("windpw created");
 	}
+	assert(pApp->window);
 
 }
 
@@ -108,6 +110,11 @@ VkInstance create_instance(App *pApp){
 		.enabledLayerCount = 0,
 
 	};
+	#ifdef _DEBUG
+	const char* debugLayers[] = {"VK_LAYER_KHRONOS_validation"};
+	create_info.ppEnabledLayerNames = debugLayers;
+	create_info.enabledLayerCount = ARRAYSIZE(debugLayers);
+#endif
 	VK_CHECK(vkCreateInstance(&create_info, NULL, &instance));
 
         #ifndef NDEBUG
@@ -144,6 +151,63 @@ VkSurfaceKHR create_surface(App *pApp){
 
 	
 }
+
+VkPhysicalDevice select_gpu_device(VkInstance instance){
+
+	VkPhysicalDevice gpu_device = VK_NULL_HANDLE;
+	VkPhysicalDevice gpu_devices[8];
+	u32 count = ARRAYSIZE(gpu_devices);
+	VK_CHECK(vkEnumeratePhysicalDevices(instance, &count, gpu_devices));
+
+	    VkPhysicalDevice selected_gpu_device = VK_NULL_HANDLE,
+                     discrete = VK_NULL_HANDLE, fallback = VK_NULL_HANDLE;
+    
+    for (u32 i = 0; i < count; ++i) {
+      VkPhysicalDeviceProperties props = {0};
+      vkGetPhysicalDeviceProperties(gpu_devices[i], &props);
+      printf("GPU%d: %s\n", i, props.deviceName);
+      discrete = (!discrete && props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+              ? gpu_devices[i] : discrete;
+      fallback = (!fallback) ? gpu_devices[i] : fallback;
+    }
+    
+    selected_gpu_device = discrete ? discrete : fallback;
+    if (selected_gpu_device) {
+      VkPhysicalDeviceProperties props = {0};
+      vkGetPhysicalDeviceProperties(selected_gpu_device, &props);
+      printf("Selected GPU: %s\n", props.deviceName);
+    } else {
+      printf("No suitable GPU found\n");
+      exit(1);
+    }
+	VkPhysicalDeviceProperties props;
+	vkGetPhysicalDeviceProperties(selected_gpu_device, &props);
+
+		printf("\n=== SELECTED GPU ===\n");
+	printf("Name: %s\n", props.deviceName);
+	printf("Type: %s\n", props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "Discrete GPU" : "Integrated GPU");
+	printf("Vendor ID: 0x%X\n", props.vendorID);
+	printf("Device ID: 0x%X\n", props.deviceID);
+	printf("Vulkan API: %d.%d.%d\n",
+	    VK_VERSION_MAJOR(props.apiVersion),
+	    VK_VERSION_MINOR(props.apiVersion),
+	    VK_VERSION_PATCH(props.apiVersion));
+	printf("Driver: %d.%d.%d\n",
+	    VK_VERSION_MAJOR(props.driverVersion),
+	    VK_VERSION_MINOR(props.driverVersion),
+	    VK_VERSION_PATCH(props.driverVersion));
+	printf("Max Texture Size: %d x %d\n",
+	    props.limits.maxImageDimension2D,
+	    props.limits.maxImageDimension2D);
+	printf("Max Uniform Buffer Size: %u MB\n",
+	    props.limits.maxUniformBufferRange / (1024 * 1024));
+	printf("====================\n\n");
+
+	return selected_gpu_device;
+
+}
+
+
 void init_vulkan(App *pApp){
 	pApp->instance = create_instance(pApp);
 	pApp->surface  = create_surface(pApp);
