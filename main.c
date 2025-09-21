@@ -34,6 +34,9 @@ typedef struct App {
 	GLFWwindow *window;
 	VkInstance instance;
 	VkSurfaceKHR  surface;
+	VkPhysicalDevice gpu_device;
+	u32 queue_family_index;
+	VkDevice gpu_thread;// one handler to gpu for indirect convo with gpu instead of directly interacting the monster(i am imagining it as thread connecting us to gpu and many threads we can create)
 
 } App;
 
@@ -45,6 +48,9 @@ void cleanup(App *pApp);
 VkInstance create_instance(App *pApp);
 VkSurfaceKHR create_surface(App *pApp);
 VkPhysicalDevice select_gpu_device(VkInstance instance);
+u_short find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device);
+VkDevice create_gpu_thread(VkPhysicalDevice selected_physical_device, u32 queue_family_index);
+
 
 int main() {
 	 App app = {0};
@@ -126,6 +132,7 @@ VkInstance create_instance(App *pApp){
 
 VkSurfaceKHR create_surface(App *pApp){
 	VkSurfaceKHR surface;
+/**
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
 	VkWaylandSurfaceCreateInfoKHR surfacecreateInfo = {
 	    .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
@@ -144,8 +151,8 @@ VkSurfaceKHR create_surface(App *pApp){
 	fprintf(stderr, "No supported platform defined for Vulkan surface creation\n");
 	exit(1);
 #endif
-
-// VK_CHECK(glfwCreateWindowSurface(pApp->instance, pApp->window, NULL, &pApp->surface));
+**/
+      VK_CHECK(glfwCreateWindowSurface(pApp->instance, pApp->window, NULL, &surface));
 	
 	return surface;
 
@@ -207,11 +214,75 @@ VkPhysicalDevice select_gpu_device(VkInstance instance){
 
 }
 
+u_short find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device){
+    u32 queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(selected_gpu_device, &queue_family_count, NULL);
+    VkQueueFamilyProperties *queue_families = malloc(queue_family_count * sizeof(VkQueueFamilyProperties));
+    vkGetPhysicalDeviceQueueFamilyProperties(selected_gpu_device, &queue_family_count, queue_families);
+    
+    u32 queue_family_index = UINT32_MAX;
+    for (u32 i = 0; i < queue_family_count; ++i) {
+      if (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        queue_family_index = i;
+        break;
+      }
+    }
+    
+	assert(queue_family_index != UINT32_MAX && "No suitable queue family found");
+	return queue_family_index;
+}
 
+VkDevice create_gpu_thread(VkPhysicalDevice selected_gpu_device, u32 queue_family_index){
+	float queue_priority = 1.0f;
+	VkDeviceQueueCreateInfo queue_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+	    .queueFamilyIndex = queue_family_index,
+	    .queueCount = 1,
+	    .pQueuePriorities = &queue_priority,
+	};
+
+	const char* thread_extensions[] = {
+	    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+	    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+	    VK_KHR_MAINTENANCE2_EXTENSION_NAME,
+	    VK_KHR_MULTIVIEW_EXTENSION_NAME,
+	    VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+	    VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME};
+
+	VkPhysicalDeviceDynamicRenderingFeatures dynamic_rendering_features = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+	    .dynamicRendering = VK_TRUE,
+	};
+
+	VkPhysicalDeviceFeatures2 features2 = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+	    .features = {
+	        .samplerAnisotropy = VK_TRUE,
+	    },
+	    .pNext = &dynamic_rendering_features,
+	};
+
+	VkDeviceCreateInfo thread_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+	    .pNext = &features2,
+	    .queueCreateInfoCount = 1,
+	    .pQueueCreateInfos = &queue_create_info,
+	    .enabledExtensionCount = ARRAYSIZE(thread_extensions),
+	    .ppEnabledExtensionNames = thread_extensions,
+	};
+
+	VkDevice thread;
+	VK_CHECK(vkCreateDevice(selected_gpu_device, &thread_create_info, 0, &thread));
+	return thread;
+
+
+}
 void init_vulkan(App *pApp){
 	pApp->instance = create_instance(pApp);
 	pApp->surface  = create_surface(pApp);
-
+	pApp->gpu_device = select_gpu_device(pApp->instance);
+	pApp->queue_family_index = find_gpu_queue_family_index(pApp->gpu_device);
+	pApp->gpu_thread = create_gpu_thread(pApp->gpu_device, pApp->queue_family_index);
 }
 void main_loop(App *pApp){
 		while (!glfwWindowShouldClose(pApp->window)) {
