@@ -31,12 +31,22 @@ const uint32_t WIN_WIDTH = 800;
 const uint32_t WIN_HEIGHT = 600;
 
 typedef struct App {
+	int width, height;
 	GLFWwindow *window;
 	VkInstance instance;
 	VkSurfaceKHR  surface;
 	VkPhysicalDevice gpu_device;
 	u32 queue_family_index;
 	VkDevice gpu_thread;// one handler to gpu for indirect convo with gpu instead of directly interacting the monster(i am imagining it as thread connecting us to gpu and many threads we can create)
+	
+	//swapchain 
+	VkSwapchainKHR swapchain;
+	VkFormat swapchain_format;
+	VkColorSpaceKHR swapchain_color_space;
+	VkImage* swapchain_images;
+	VkImageView* swapchain_image_views;
+	u32 swapchain_image_count;
+	
 
 } App;
 
@@ -50,7 +60,7 @@ VkSurfaceKHR create_surface(App *pApp);
 VkPhysicalDevice select_gpu_device(VkInstance instance);
 u_short find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device);
 VkDevice create_gpu_thread(VkPhysicalDevice selected_physical_device, u32 queue_family_index);
-
+VkSwapchainKHR create_swapchain(App *pApp);
 
 int main() {
 	 App app = {0};
@@ -275,14 +285,47 @@ VkDevice create_gpu_thread(VkPhysicalDevice selected_gpu_device, u32 queue_famil
 	VK_CHECK(vkCreateDevice(selected_gpu_device, &thread_create_info, 0, &thread));
 	return thread;
 
+}
+VkSwapchainKHR create_swapchain(App *pApp){
+	u32 queue_family_index = find_gpu_queue_family_index(pApp->gpu_device);
+	VkBool32 present_supported = 0;
+	VK_CHECK(vkGetPhysicalDeviceSurfaceSupportKHR(
+	    pApp->gpu_device, queue_family_index, pApp->surface, &present_supported));
+	assert(present_supported);
+	VkSurfaceCapabilitiesKHR surface_capabilities;
+	VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+	    pApp->gpu_device, pApp->surface, &surface_capabilities));
+	VkSwapchainCreateInfoKHR swapchain_info = {
+	    .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+	    .surface = pApp->surface,
+	    .minImageCount = surface_capabilities.minImageCount,
+	    .imageFormat = pApp->swapchain_format,
+	    .imageColorSpace = pApp->swapchain_color_space,
+	    .imageExtent = {.width = pApp->width, .height = pApp->height},
+	    .imageArrayLayers = 1,
+	    .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+	    .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+	    .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+	    .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+	    .presentMode = VK_PRESENT_MODE_FIFO_KHR,
+	    .clipped = VK_TRUE,
+	    .queueFamilyIndexCount = 1,
+	    .pQueueFamilyIndices = &queue_family_index,
+	};
+	VkSwapchainKHR swapchain;
+	VK_CHECK(vkCreateSwapchainKHR(pApp->gpu_thread, &swapchain_info, 0, &swapchain));
+	return swapchain;
+	
 
 }
+
 void init_vulkan(App *pApp){
 	pApp->instance = create_instance(pApp);
 	pApp->surface  = create_surface(pApp);
 	pApp->gpu_device = select_gpu_device(pApp->instance);
 	pApp->queue_family_index = find_gpu_queue_family_index(pApp->gpu_device);
 	pApp->gpu_thread = create_gpu_thread(pApp->gpu_device, pApp->queue_family_index);
+	pApp->swapchain = create_swapchain(pApp);
 }
 void main_loop(App *pApp){
 		while (!glfwWindowShouldClose(pApp->window)) {
