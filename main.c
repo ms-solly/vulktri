@@ -451,7 +451,7 @@ VkImageView *create_swapchain_views(App *pApp){
     printf("[Swapchain] Created %u image views!\n", swapchain_image_count);
     return swapchain_image_views;
 }
-VkFence* create_fences(VkDevice device, uint32_t count) {
+/**VkFence* create_fences(VkDevice device, uint32_t count) {
     VkFence* fences = malloc(sizeof(VkFence) * count);
     if (!fences) {
         fprintf(stderr, "Failed to allocate memory for fences\n");
@@ -468,33 +468,27 @@ VkFence* create_fences(VkDevice device, uint32_t count) {
     }
 
     return fences;
-}
+}**/
 
-void sync(App *pApp){
-    VkSemaphoreCreateInfo semaphore_info = {
-        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-    };
-
-    VkFenceCreateInfo fence_info = {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT, 
-	};
-
-pApp->image_available_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
-pApp->render_complete_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
-
+void sync(App *pApp) {
+    pApp->image_available_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
+    pApp->render_complete_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
     pApp->in_flight_fences = malloc(sizeof(VkFence) * pApp->swapchain_image_count);
-	
+        VkFenceCreateInfo fence_info = {
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT
+        };
+    for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
+        pApp->image_available_semaphore[i] = create_semaphore(pApp->gpu_thread);
+        pApp->render_complete_semaphore[i] = create_semaphore(pApp->gpu_thread);
 
-	for (uint32_t i = 0; i < pApp->swapchain_image_count; i++) {
-    pApp->image_available_semaphore[i] = create_semaphore(pApp->gpu_thread);
-    pApp->render_complete_semaphore[i] = create_semaphore(pApp->gpu_thread);
-pApp->in_flight_fences = create_fences(pApp->gpu_thread, pApp->swapchain_image_count);
-		
-		
+
+        VK_CHECK(vkCreateFence(pApp->gpu_thread, &fence_info, NULL, &pApp->in_flight_fences[i]));
+    }
+    printf("sync objects created (semaphores & fences)\n");
 }
-	printf("sync objects created(semaphores & fences)\nsync is on.........\n");
-}
+
+
 VkCommandPool create_command_pool(App *pApp) {
     VkCommandPoolCreateInfo pool_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -707,27 +701,107 @@ void main_loop(App *pApp){
 		}
 }
 void cleanup(App *pApp){
-		glfwDestroyWindow(pApp->window);
-   if (pApp->swapchain != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(pApp->gpu_thread, pApp->swapchain, NULL);
+if (pApp->gpu_thread != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(pApp->gpu_thread);
     }
 
+    // Destroy command buffers (they're allocated from pool, so just free them)
+    if (pApp->command_buffers) {
+        vkFreeCommandBuffers(pApp->gpu_thread, pApp->command_pool, 
+                           pApp->swapchain_image_count, pApp->command_buffers);
+        free(pApp->command_buffers);
+        pApp->command_buffers = NULL;
+    }
+
+    // Destroy command pool
+    if (pApp->command_pool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(pApp->gpu_thread, pApp->command_pool, NULL);
+        pApp->command_pool = VK_NULL_HANDLE;
+    }
+
+    // Destroy synchronization objects
+    if (pApp->in_flight_fences) {
+        for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
+            if (pApp->in_flight_fences[i] != VK_NULL_HANDLE) {
+                vkDestroyFence(pApp->gpu_thread, pApp->in_flight_fences[i], NULL);
+            }
+        }
+        free(pApp->in_flight_fences);
+        pApp->in_flight_fences = NULL;
+    }
+
+    if (pApp->image_available_semaphore) {
+        for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
+            if (pApp->image_available_semaphore[i] != VK_NULL_HANDLE) {
+                vkDestroySemaphore(pApp->gpu_thread, pApp->image_available_semaphore[i], NULL);
+            }
+        }
+        free(pApp->image_available_semaphore);
+        pApp->image_available_semaphore = NULL;
+    }
+
+    if (pApp->render_complete_semaphore) {
+        for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
+            if (pApp->render_complete_semaphore[i] != VK_NULL_HANDLE) {
+                vkDestroySemaphore(pApp->gpu_thread, pApp->render_complete_semaphore[i], NULL);
+            }
+        }
+        free(pApp->render_complete_semaphore);
+        pApp->render_complete_semaphore = NULL;
+    }
+
+    // Destroy swapchain image views
+    if (pApp->swapchain_image_views) {
+        for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
+            if (pApp->swapchain_image_views[i] != VK_NULL_HANDLE) {
+                vkDestroyImageView(pApp->gpu_thread, pApp->swapchain_image_views[i], NULL);
+            }
+        }
+        free(pApp->swapchain_image_views);
+        pApp->swapchain_image_views = NULL;
+    }
+
+    // Destroy swapchain (images are owned by swapchain, so they're destroyed automatically)
+    if (pApp->swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(pApp->gpu_thread, pApp->swapchain, NULL);
+        pApp->swapchain = VK_NULL_HANDLE;
+    }
+
+    // Free swapchain images array (images themselves are destroyed with swapchain)
+    if (pApp->swapchain_images) {
+        free(pApp->swapchain_images);
+        pApp->swapchain_images = NULL;
+    }
+
+    // Destroy logical device
     if (pApp->gpu_thread != VK_NULL_HANDLE) {
         vkDestroyDevice(pApp->gpu_thread, NULL);
+        pApp->gpu_thread = VK_NULL_HANDLE;
     }
 
+    // Destroy surface
     if (pApp->surface != VK_NULL_HANDLE) {
         vkDestroySurfaceKHR(pApp->instance, pApp->surface, NULL);
+        pApp->surface = VK_NULL_HANDLE;
     }
 
+    // Destroy instance
     if (pApp->instance != VK_NULL_HANDLE) {
         vkDestroyInstance(pApp->instance, NULL);
+        pApp->instance = VK_NULL_HANDLE;
     }
 
+    // Destroy window and terminate GLFW
     if (pApp->window) {
         glfwDestroyWindow(pApp->window);
+        pApp->window = NULL;
     }
-		glfwTerminate();
+
+    glfwTerminate();
+    
+    printf("Cleanup completed successfully!\n");
+
+
 }
 
 
