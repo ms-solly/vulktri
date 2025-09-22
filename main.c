@@ -91,8 +91,8 @@ VkSemaphore create_semaphore(VkDevice device) {
     VK_CHECK(vkCreateSemaphore(device, &info, NULL, &semaphore));
     return semaphore;
 }
-
 VkImageView create_image_view(App *pApp);
+VkPipeline create_graphics_pipeline(App *pApp);
 
 
 int main() {
@@ -611,6 +611,19 @@ vkCmdPipelineBarrier(
 
 	return command_buffers;
 }
+
+VkPipeline create_graphics_pipeline(App *pApp){
+	VkPipeline pipeline;
+
+	VkGraphicsPipelineCreateInfo create_info = {
+		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+		.renderPass = VK_NULL_HANDLE,
+
+	};
+	vkCreateGraphicsPipelines(pApp->gpu_thread,VK_NULL_HANDLE ,1, &create_info,NULL,&pipeline);
+
+}
+
 static uint32_t current_frame = 0;
 
 void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
