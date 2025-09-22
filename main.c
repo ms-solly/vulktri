@@ -604,6 +604,7 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
 }
 
 void init_vulkan(App *pApp){
+	VK_CHECK(volkInitialize());
 	pApp->instance = create_instance(pApp);
 	volkLoadInstance(pApp->instance);
 	pApp->surface  = create_surface(pApp);
