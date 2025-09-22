@@ -56,8 +56,8 @@ typedef struct App {
 
 	VkSemaphore *image_available_semaphore;
 	VkSemaphore *render_complete_semaphore;
+	VkFence* in_flight_fences;
 
-	VkSemaphore *present_semaphores; 
 	VkQueue graphics_queue;
 	VkCommandPool command_pool;
 	VkCommandBuffer* command_buffers;
@@ -91,6 +91,7 @@ VkSemaphore create_semaphore(VkDevice device) {
     VK_CHECK(vkCreateSemaphore(device, &info, NULL, &semaphore));
     return semaphore;
 }
+
 VkImageView create_image_view(App *pApp);
 
 
@@ -406,15 +407,10 @@ VkImage *create_swapchain_images(App *pApp,  VkSwapchainKHR swapchain) {
 	printf("[Swapchain] Image count: %u\n", pApp->swapchain_image_count);
 
 	pApp->swapchain_images = malloc(pApp->swapchain_image_count * sizeof(VkImage));
-	pApp->present_semaphores = malloc(pApp->swapchain_image_count * sizeof(VkSemaphore));
 
 	vkGetSwapchainImagesKHR(pApp->gpu_thread, swapchain, &pApp->swapchain_image_count, pApp->swapchain_images);
 
-	for (u32 i = 0; i < pApp->swapchain_image_count; ++i)
-	{
-		// Create a per-image semaphore to be signaled when rendering that image completes
-		pApp->present_semaphores[i] = create_semaphore(pApp->gpu_thread);
-	}
+
 
 	printf("[Swapchain] Image count: %u\n", pApp->swapchain_image_count);
 
@@ -455,23 +451,49 @@ VkImageView *create_swapchain_views(App *pApp){
     printf("[Swapchain] Created %u image views!\n", swapchain_image_count);
     return swapchain_image_views;
 }
+VkFence* create_fences(VkDevice device, uint32_t count) {
+    VkFence* fences = malloc(sizeof(VkFence) * count);
+    if (!fences) {
+        fprintf(stderr, "Failed to allocate memory for fences\n");
+        exit(1);
+    }
+
+    VkFenceCreateInfo fence_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT // Start signaled for first use
+    };
+
+    for (uint32_t i = 0; i < count; i++) {
+        VK_CHECK(vkCreateFence(device, &fence_info, NULL, &fences[i]));
+    }
+
+    return fences;
+}
 
 void sync(App *pApp){
     VkSemaphoreCreateInfo semaphore_info = {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
     };
+
+    VkFenceCreateInfo fence_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT, 
+	};
+
 pApp->image_available_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
 pApp->render_complete_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
-/**
-for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
-    VK_CHECK(vkCreateSemaphore(pApp->gpu_thread, &semaphore_info, NULL, &pApp->image_available_semaphore[i]));
-    VK_CHECK(vkCreateSemaphore(pApp->gpu_thread, &semaphore_info, NULL, &pApp->render_complete_semaphore[i]));
-}**/
+
+    pApp->in_flight_fences = malloc(sizeof(VkFence) * pApp->swapchain_image_count);
+	
+
 	for (uint32_t i = 0; i < pApp->swapchain_image_count; i++) {
     pApp->image_available_semaphore[i] = create_semaphore(pApp->gpu_thread);
     pApp->render_complete_semaphore[i] = create_semaphore(pApp->gpu_thread);
+pApp->in_flight_fences = create_fences(pApp->gpu_thread, pApp->swapchain_image_count);
+		
+		
 }
-	printf("sync is on.........\n");
+	printf("sync objects created(semaphores & fences)\nsync is on.........\n");
 }
 VkCommandPool create_command_pool(App *pApp) {
     VkCommandPoolCreateInfo pool_info = {
@@ -560,6 +582,33 @@ pApp->vkCmdBeginRendering(command_buffers[i], &render_info);
 
         // TODO: pipeline + vkCmdDraw here later
 pApp->vkCmdEndRendering(command_buffers[i]);
+VkImageMemoryBarrier present_barrier = {
+    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+    .image = pApp->swapchain_images[i],
+    .subresourceRange = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    },
+    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    .dstAccessMask = 0,
+};
+
+vkCmdPipelineBarrier(
+    command_buffers[i],
+    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+    VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+    0,
+    0, NULL,
+    0, NULL,
+    1, &present_barrier
+);
 
 
         VK_CHECK(vkEndCommandBuffer(command_buffers[i]));
@@ -568,14 +617,18 @@ pApp->vkCmdEndRendering(command_buffers[i]);
 
 	return command_buffers;
 }
+static uint32_t current_frame = 0;
+
 void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
+
+	VK_CHECK(vkWaitForFences(pApp->gpu_thread, 1, &pApp->in_flight_fences[current_frame], VK_TRUE, UINT64_MAX));
+    VK_CHECK(vkResetFences(pApp->gpu_thread, 1, &pApp->in_flight_fences[current_frame]));
     u32 image_index ;
-	u32 frame_index = 0;
     VK_CHECK(vkAcquireNextImageKHR(
         pApp->gpu_thread,
         pApp->swapchain,
         UINT64_MAX,
-        pApp->image_available_semaphore[frame_index],
+        pApp->image_available_semaphore[current_frame],
         VK_NULL_HANDLE,
         &image_index));
 
@@ -584,26 +637,27 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &pApp->image_available_semaphore[image_index],
+        .pWaitSemaphores = &pApp->image_available_semaphore[current_frame],
         .pWaitDstStageMask = &wait_stage,
         .commandBufferCount = 1,
         .pCommandBuffers = &command_buffers[image_index],
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &pApp->render_complete_semaphore[image_index],
+        .pSignalSemaphores = &pApp->render_complete_semaphore[current_frame],
     };
+    VK_CHECK(vkQueueSubmit(pApp->graphics_queue, 1, &submit_info, pApp->in_flight_fences[current_frame]));
 
-    VK_CHECK(vkQueueSubmit(pApp->graphics_queue, 1, &submit_info, VK_NULL_HANDLE));
 
     VkPresentInfoKHR present_info = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &pApp->render_complete_semaphore[image_index],
+        .pWaitSemaphores = &pApp->render_complete_semaphore[current_frame],
         .swapchainCount = 1,
         .pSwapchains = &pApp->swapchain,
         .pImageIndices = &image_index,
     };
 
     VK_CHECK(vkQueuePresentKHR(pApp->graphics_queue, &present_info));
+current_frame = (current_frame + 1) % pApp->swapchain_image_count;
 
    // vkQueueWaitIdle(pApp->graphics_queue);
 }
@@ -627,8 +681,6 @@ void init_vulkan(App *pApp){
 		printf("[warning]begin rendering is null\n");
 	}
 
-	pApp->vkCmdEndRendering =
-		(PFN_vkCmdEndRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdEndRenderingKHR");
 	pApp->vkCmdEndRendering = (PFN_vkCmdEndRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdEndRenderingKHR");
 	if(pApp->vkCmdEndRendering==NULL){
 		printf("[warning]end rendering is null\n");
@@ -637,6 +689,7 @@ void init_vulkan(App *pApp){
 		printf("Failed to load dynamic rendering function pointers\n");
 		exit(1);
 	}
+	
 	pApp->graphics_queue = create_graphics_queue(pApp);	
 	pApp->swapchain = create_swapchain(pApp);
 	pApp->swapchain_images=create_swapchain_images(pApp, pApp->swapchain);
