@@ -61,6 +61,8 @@ typedef struct App {
 	VkQueue graphics_queue;
 	VkCommandPool command_pool;
 	VkCommandBuffer* command_buffers;
+	PFN_vkCmdBeginRendering vkCmdBeginRendering;
+	PFN_vkCmdEndRendering vkCmdEndRendering;
 
 } App;
 
@@ -503,12 +505,39 @@ VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buff
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         };
         VK_CHECK(vkBeginCommandBuffer(command_buffers[i], &begin_info));
+		//transition layoiut 
+ VkImageMemoryBarrier barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = pApp->swapchain_images[i],
+            .subresourceRange = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            },
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        };
 
+        vkCmdPipelineBarrier(
+            command_buffers[i],
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0,
+            0, NULL,
+            0, NULL,
+            1, &barrier);
+		
         // Dynamic Rendering setup
         VkRenderingAttachmentInfo color_attachment = {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .imageView = pApp->swapchain_image_views[i],
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
+		.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,			
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
             .clearValue.color = {{0.1f, 0.2f, 0.4f, 1.0f}}, // blueish background
@@ -525,13 +554,15 @@ VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buff
 
         vkCmdBeginRendering(command_buffers[i], &render_info);
 
-        // Here we would bind pipeline + draw in the future
+        // TODO: pipeline + vkCmdDraw here later
 
         vkCmdEndRendering(command_buffers[i]);
 
         VK_CHECK(vkEndCommandBuffer(command_buffers[i]));
     }
 	printf("command record buffer created ...........\n");
+
+	return command_buffers;
 }
 void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
     u32 image_index = 0;
@@ -539,7 +570,7 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
         pApp->gpu_thread,
         pApp->swapchain,
         UINT64_MAX,
-        pApp->image_available_semaphore[image_index],
+        pApp->image_available_semaphore[0],
         VK_NULL_HANDLE,
         &image_index));
 
@@ -585,7 +616,7 @@ void init_vulkan(App *pApp){
 	sync(pApp);
 	pApp->command_pool = create_command_pool(pApp);
 	pApp->command_buffers = create_command_buffers(pApp, pApp->command_pool);
-	record_command_buffers(pApp, pApp->command_buffers);
+	pApp->command_buffers = record_command_buffers(pApp, pApp->command_buffers);
 }
 void main_loop(App *pApp){
 		while (!glfwWindowShouldClose(pApp->window)) {
