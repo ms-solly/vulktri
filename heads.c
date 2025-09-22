@@ -1,19 +1,37 @@
-#include <assert.h> // for fast fail
-#include <stdbool.h>//dt 
-#include <stdint.h>//dt 
-#include <stdio.h>// ip/op 
-#include <stdlib.h>// 
-#include <string.h>
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include<string.h>
+#define _USE_MATH_DEFINE
+#include <math.h>
+//#include "ext/stb/stb_ds.h"
+#define VK_NO_PROTOTYPES
+#define GLFW_INCLUDE_VULKAN
+//#include "ext/stb/stb_image.h"
+#include <GLFW/glfw3.h>
+//#include "ext/cgltf/cgltf.h"
+#define GLFW_EXPOSE_NATIVE_X11
+#define GLFW_EXPOSE_NATIVE_WAYLAND
+#include <GLFW/glfw3native.h>
+//#include "ext/fast_obj/fast_obj.h"
+#include "ext/volk/volk.h"
+//#include "ext/cglm/include/cglm/cglm.h"
+// Nuklear GUI includes
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_X11
+#define GLFW_EXPOSE_NATIVE_WAYLAND
+#include <GLFW/glfw3native.h>
+
 // api headers
 //#include <vulkan/vulkan.h>
 
-#include <vulkan/vulkan_core.h>
-#include <vulkan/vulkan_wayland.h>
+//#include <vulkan/vulkan_core.h>
+//#include <vulkan/vulkan_wayland.h>
 // window creation
-#define GLFW_INCLUDE_VULKAN
-#define GLFW_EXPOSE_NATIVE_WAYLAND
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+
 // gui headers
 // & macros
 //flags

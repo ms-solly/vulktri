@@ -1,6 +1,6 @@
 // flags
-#define GLFW_INCLUDE_VULKAN
-#define GLFW_EXPOSE_NATIVE_WAYLAND
+//#define GLFW_INCLUDE_VULKAN
+//#define GLFW_EXPOSE_NATIVE_WAYLAND
 
 /*
 #define NK_INCLUDE_FIXED_TYPES
@@ -197,7 +197,7 @@ VkSurfaceKHR create_surface(App *pApp){
 	fprintf(stderr, "No supported platform defined for Vulkan surface creation\n");
 	exit(1);
 #endif
-**/
+**/ 
       VK_CHECK(glfwCreateWindowSurface(pApp->instance, pApp->window, NULL, &surface));
 
 	if(surface !=NULL){
@@ -552,11 +552,11 @@ VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buff
             .pColorAttachments = &color_attachment,
         };
 
-        vkCmdBeginRendering(command_buffers[i], &render_info);
+pApp->vkCmdBeginRendering(command_buffers[i], &render_info);
 
         // TODO: pipeline + vkCmdDraw here later
+pApp->vkCmdEndRendering(command_buffers[i]);
 
-        vkCmdEndRendering(command_buffers[i]);
 
         VK_CHECK(vkEndCommandBuffer(command_buffers[i]));
     }
@@ -605,10 +605,19 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
 
 void init_vulkan(App *pApp){
 	pApp->instance = create_instance(pApp);
+	volkLoadInstance(pApp->instance);
 	pApp->surface  = create_surface(pApp);
 	pApp->gpu_device = select_gpu_device(pApp->instance);
 	pApp->queue_family_index = find_gpu_queue_family_index(pApp->gpu_device, pApp->surface);
 	pApp->gpu_thread = create_gpu_thread(pApp->gpu_device, pApp->queue_family_index.graphics_index);
+	volkLoadDevice(pApp->gpu_thread);
+	pApp->vkCmdBeginRendering = (PFN_vkCmdBeginRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdBeginRendering");
+	pApp->vkCmdEndRendering = (PFN_vkCmdEndRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdEndRendering");
+
+	if (pApp->vkCmdBeginRendering == NULL || pApp->vkCmdEndRendering == NULL) {
+		printf("Failed to load dynamic rendering function pointers\n");
+		exit(1);
+	}
 	pApp->graphics_queue = create_graphics_queue(pApp);	
 	pApp->swapchain = create_swapchain(pApp);
 	pApp->swapchain_images=create_swapchain_images(pApp, pApp->swapchain);
