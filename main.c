@@ -47,7 +47,15 @@ typedef struct App {
 	VkImageView* swapchain_image_views;
 	u32 swapchain_image_count;
 	
+	struct semaphores{
+		VkSemaphore image_available_semaphore;
+		VkSemaphore render_complete_semaphore;
+	}semaphores; 
 
+	VkQueue graphics_queue;
+	VkCommandPool command_pool;
+	VkCommandBuffer* command_buffers;
+	
 } App;
 
 void init_window(App *pApp);
@@ -58,10 +66,13 @@ void cleanup(App *pApp);
 VkInstance create_instance(App *pApp);
 VkSurfaceKHR create_surface(App *pApp);
 VkPhysicalDevice select_gpu_device(VkInstance instance);
-u_short find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device);
+u32 find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device);
 VkDevice create_gpu_thread(VkPhysicalDevice selected_physical_device, u32 queue_family_index);
+VkQueue create_graphics_queue(App *pApp);
 VkSwapchainKHR create_swapchain(App *pApp);
-
+void sync(App *pApp);
+void create_swapchain_images(App *pApp);
+void record_command_buffers(App *pApp, VkCommandBuffer* command_buffers);
 int main() {
 	 App app = {0};
 
@@ -80,7 +91,7 @@ void init_window(App *pApp){
 
 	pApp->window = glfwCreateWindow(WIN_WIDTH, WIN_HEIGHT, WIN_TITLE, NULL, NULL);
 	if(pApp->window){
-		printf("windpw created");
+		printf("windpw created....\n");
 	}
 	assert(pApp->window);
     glfwGetWindowSize(pApp->window, &pApp->width, &pApp->height);
@@ -225,7 +236,7 @@ VkPhysicalDevice select_gpu_device(VkInstance instance){
 
 }
 
-u_short find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device){
+u32 find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device){
     u32 queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(selected_gpu_device, &queue_family_count, NULL);
     VkQueueFamilyProperties *queue_families = malloc(queue_family_count * sizeof(VkQueueFamilyProperties));
@@ -287,6 +298,11 @@ VkDevice create_gpu_thread(VkPhysicalDevice selected_gpu_device, u32 queue_famil
 	return thread;
 
 }
+VkQueue create_graphics_queue(App *pApp){
+	VkQueue queue;
+	vkGetDeviceQueue(pApp->gpu_thread, pApp->queue_family_index, 0, &queue);
+	return queue;
+}
 VkSwapchainKHR create_swapchain(App *pApp){
 	u32 queue_family_index = find_gpu_queue_family_index(pApp->gpu_device);
 	VkBool32 present_supported = 0;
@@ -336,6 +352,143 @@ VkSwapchainKHR create_swapchain(App *pApp){
 	
 
 }
+void create_swapchain_images(App *pApp) {
+    VK_CHECK(vkGetSwapchainImagesKHR(
+        pApp->gpu_thread, pApp->swapchain, &pApp->swapchain_image_count, NULL));
+
+    pApp->swapchain_images = malloc(sizeof(VkImage) * pApp->swapchain_image_count);
+    VK_CHECK(vkGetSwapchainImagesKHR(
+        pApp->gpu_thread, pApp->swapchain,
+        &pApp->swapchain_image_count, pApp->swapchain_images));
+
+    pApp->swapchain_image_views =
+        malloc(sizeof(VkImageView) * pApp->swapchain_image_count);
+
+    for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
+        VkImageViewCreateInfo view_info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = pApp->swapchain_images[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = pApp->swapchain_format,
+            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .subresourceRange.baseMipLevel = 0,
+            .subresourceRange.levelCount = 1,
+            .subresourceRange.baseArrayLayer = 0,
+            .subresourceRange.layerCount = 1,
+        };
+        VK_CHECK(vkCreateImageView(
+            pApp->gpu_thread, &view_info, NULL, &pApp->swapchain_image_views[i]));
+    }
+
+    printf("Swapchain images created: %u\n", pApp->swapchain_image_count);
+}
+
+void sync(App *pApp){
+    VkSemaphoreCreateInfo semaphoreInfo = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+    };
+
+    VK_CHECK(vkCreateSemaphore(pApp->gpu_thread, &semaphoreInfo, NULL, &pApp->semaphores.image_available_semaphore));
+    VK_CHECK(vkCreateSemaphore(pApp->gpu_thread, &semaphoreInfo, NULL, &pApp->semaphores.render_complete_semaphore));
+}
+VkCommandPool create_command_pool(App *pApp) {
+    VkCommandPoolCreateInfo pool_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .queueFamilyIndex = pApp->queue_family_index,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+    };
+
+    VkCommandPool command_pool;
+    VK_CHECK(vkCreateCommandPool(pApp->gpu_thread, &pool_info, NULL, &command_pool));
+    return command_pool;
+}
+
+VkCommandBuffer* create_command_buffers(App *pApp, VkCommandPool command_pool) {
+    VkCommandBufferAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = pApp->swapchain_image_count,
+    };
+
+    VkCommandBuffer* buffers = malloc(sizeof(VkCommandBuffer) * pApp->swapchain_image_count);
+    VK_CHECK(vkAllocateCommandBuffers(pApp->gpu_thread, &alloc_info, buffers));
+
+    return buffers;
+}
+void record_command_buffers(App *pApp, VkCommandBuffer* command_buffers) {
+    for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
+        VkCommandBufferBeginInfo begin_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        };
+        VK_CHECK(vkBeginCommandBuffer(command_buffers[i], &begin_info));
+
+        // Dynamic Rendering setup
+        VkRenderingAttachmentInfo color_attachment = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = pApp->swapchain_image_views[i],
+            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue.color = {{0.1f, 0.2f, 0.4f, 1.0f}}, // blueish background
+        };
+
+        VkRenderingInfo render_info = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea.offset = {0, 0},
+            .renderArea.extent = {pApp->width, pApp->height},
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &color_attachment,
+        };
+
+        vkCmdBeginRendering(command_buffers[i], &render_info);
+
+        // Here we would bind pipeline + draw in the future
+
+        vkCmdEndRendering(command_buffers[i]);
+
+        VK_CHECK(vkEndCommandBuffer(command_buffers[i]));
+    }
+}
+void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
+    u32 image_index;
+    VK_CHECK(vkAcquireNextImageKHR(
+        pApp->gpu_thread,
+        pApp->swapchain,
+        UINT64_MAX,
+        pApp->semaphores.image_available_semaphore,
+        VK_NULL_HANDLE,
+        &image_index));
+
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &pApp->semaphores.image_available_semaphore,
+        .pWaitDstStageMask = &wait_stage,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &command_buffers[image_index],
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &pApp->semaphores.render_complete_semaphore,
+    };
+
+    VK_CHECK(vkQueueSubmit(pApp->graphics_queue, 1, &submit_info, VK_NULL_HANDLE));
+
+    VkPresentInfoKHR present_info = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &pApp->semaphores.render_complete_semaphore,
+        .swapchainCount = 1,
+        .pSwapchains = &pApp->swapchain,
+        .pImageIndices = &image_index,
+    };
+
+    VK_CHECK(vkQueuePresentKHR(pApp->graphics_queue, &present_info));
+
+    vkQueueWaitIdle(pApp->graphics_queue);
+}
 
 void init_vulkan(App *pApp){
 	pApp->instance = create_instance(pApp);
@@ -343,16 +496,42 @@ void init_vulkan(App *pApp){
 	pApp->gpu_device = select_gpu_device(pApp->instance);
 	pApp->queue_family_index = find_gpu_queue_family_index(pApp->gpu_device);
 	pApp->gpu_thread = create_gpu_thread(pApp->gpu_device, pApp->queue_family_index);
+	pApp->graphics_queue = create_graphics_queue(pApp);	
 	pApp->swapchain = create_swapchain(pApp);
+	create_swapchain_images(pApp);
+	sync(pApp);
+	pApp->command_pool = create_command_pool(pApp);
+	pApp->command_buffers = create_command_buffers(pApp, pApp->command_pool);
+	record_command_buffers(pApp, pApp->command_buffers);
 }
 void main_loop(App *pApp){
 		while (!glfwWindowShouldClose(pApp->window)) {
 			glfwPollEvents();
+		draw_frame(pApp, pApp->command_buffers);
+		
 		}
 }
 void cleanup(App *pApp){
 		glfwDestroyWindow(pApp->window);
+   if (pApp->swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(pApp->gpu_thread, pApp->swapchain, NULL);
+    }
 
+    if (pApp->gpu_thread != VK_NULL_HANDLE) {
+        vkDestroyDevice(pApp->gpu_thread, NULL);
+    }
+
+    if (pApp->surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(pApp->instance, pApp->surface, NULL);
+    }
+
+    if (pApp->instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(pApp->instance, NULL);
+    }
+
+    if (pApp->window) {
+        glfwDestroyWindow(pApp->window);
+    }
 		glfwTerminate();
 }
 
