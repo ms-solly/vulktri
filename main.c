@@ -27,8 +27,8 @@
 #endif
 
 const char* WIN_TITLE = "Vulkan";
-const uint32_t WIN_WIDTH = 800;
-const uint32_t WIN_HEIGHT = 600;
+const u32 WIN_WIDTH = 800;
+const u32 WIN_HEIGHT = 600;
 
 typedef struct App {
 	int width, height;
@@ -51,11 +51,11 @@ typedef struct App {
 		VkSemaphore image_available_semaphore;
 		VkSemaphore render_complete_semaphore;
 	}semaphores; 
-
+	VkSemaphore present_semaphores; 
 	VkQueue graphics_queue;
 	VkCommandPool command_pool;
 	VkCommandBuffer* command_buffers;
-	
+
 } App;
 
 void init_window(App *pApp);
@@ -71,8 +71,20 @@ VkDevice create_gpu_thread(VkPhysicalDevice selected_physical_device, u32 queue_
 VkQueue create_graphics_queue(App *pApp);
 VkSwapchainKHR create_swapchain(App *pApp);
 void sync(App *pApp);
-void create_swapchain_images(App *pApp);
-void record_command_buffers(App *pApp, VkCommandBuffer* command_buffers);
+void create_swapchain_images(App *pApp, VkSwapchainKHR swapchain);
+VkCommandPool create_command_pool(App *pApp);
+VkCommandBuffer *create_command_buffers(App *pApp, VkCommandPool command_pool);
+VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buffers);
+VkSemaphore create_semaphore(VkDevice device) {
+    VkSemaphoreCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+    };
+    VkSemaphore semaphore;
+    VK_CHECK(vkCreateSemaphore(device, &info, NULL, &semaphore));
+    return semaphore;
+}
+
+
 int main() {
 	 App app = {0};
 
@@ -102,13 +114,14 @@ VkInstance create_instance(App *pApp){
 	VkInstance instance;
 	VkApplicationInfo app_info = {
 		.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-		.pApplicationName = "Hello Triangle",
+		.pApplicationName = WIN_TITLE,
 		.applicationVersion = VK_MAKE_VERSION(1, 0, 0),
 		.pEngineName = "No Engine",
 		.engineVersion = VK_MAKE_VERSION(1, 0, 0),
 		.apiVersion = VK_API_VERSION_1_3,
+		.pNext = NULL,
 	};
-	uint32_t extension_count = 0;
+	u32 extension_count = 0;
 	const char **glfw_ext = glfwGetRequiredInstanceExtensions(&extension_count);
         #ifndef NDEBUG
 	const char* extra_exts[] = { VK_EXT_DEBUG_UTILS_EXTENSION_NAME};
@@ -352,35 +365,31 @@ VkSwapchainKHR create_swapchain(App *pApp){
 	
 
 }
-void create_swapchain_images(App *pApp) {
-    VK_CHECK(vkGetSwapchainImagesKHR(
-        pApp->gpu_thread, pApp->swapchain, &pApp->swapchain_image_count, NULL));
+void create_swapchain_images(App *pApp,  VkSwapchainKHR swapchain) {
+   
+	vkGetSwapchainImagesKHR(pApp->gpu_thread, swapchain, &pApp->swapchain_image_count, NULL);
 
-    pApp->swapchain_images = malloc(sizeof(VkImage) * pApp->swapchain_image_count);
-    VK_CHECK(vkGetSwapchainImagesKHR(
-        pApp->gpu_thread, pApp->swapchain,
-        &pApp->swapchain_image_count, pApp->swapchain_images));
+	printf("[Swapchain] Image count: %u\n", pApp->swapchain_image_count);
 
-    pApp->swapchain_image_views =
-        malloc(sizeof(VkImageView) * pApp->swapchain_image_count);
+	pApp->swapchain_images = malloc(pApp->swapchain_image_count * sizeof(VkImage));
+	pApp->swapchain_image_views = malloc(pApp->swapchain_image_count * sizeof(VkImageView));
+	pApp->present_semaphores = malloc(pApp->swapchain_image_count * sizeof(VkSemaphore));
 
-    for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
-        VkImageViewCreateInfo view_info = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = pApp->swapchain_images[i],
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = pApp->swapchain_format,
-            .subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .subresourceRange.baseMipLevel = 0,
-            .subresourceRange.levelCount = 1,
-            .subresourceRange.baseArrayLayer = 0,
-            .subresourceRange.layerCount = 1,
-        };
-        VK_CHECK(vkCreateImageView(
-            pApp->gpu_thread, &view_info, NULL, &pApp->swapchain_image_views[i]));
-    }
+	vkGetSwapchainImagesKHR(pApp->gpu_thread, swapchain, &pApp->swapchain_image_count, pApp->swapchain_images);
 
-    printf("Swapchain images created: %u\n", pApp->swapchain_image_count);
+	for (u32 i = 0; i < pApp->swapchain_image_count; ++i)
+	{
+		pApp->swapchain_image_views[i] = create_image_view(pApp->gpu_thread, pApp->swapchain_images[i], pApp->swapchain_format, VK_IMAGE_VIEW_TYPE_2D, 0, 1, 0, 1);
+		// Create a per-image semaphore to be signaled when rendering that image completes
+		pApp->present_semaphores[i] = create_semaphore(pApp->gpu_thread);
+	}
+
+	printf("[Swapchain] ✅ Created %u image views!\n", pApp->swapchain_image_count);
+
+}
+
+void create_swapchain_views(){
+
 }
 
 void sync(App *pApp){
@@ -416,7 +425,7 @@ VkCommandBuffer* create_command_buffers(App *pApp, VkCommandPool command_pool) {
 
     return buffers;
 }
-void record_command_buffers(App *pApp, VkCommandBuffer* command_buffers) {
+VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buffers) {	
     for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
         VkCommandBufferBeginInfo begin_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -487,7 +496,7 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
 
     VK_CHECK(vkQueuePresentKHR(pApp->graphics_queue, &present_info));
 
-    vkQueueWaitIdle(pApp->graphics_queue);
+   // vkQueueWaitIdle(pApp->graphics_queue);
 }
 
 void init_vulkan(App *pApp){
@@ -498,7 +507,7 @@ void init_vulkan(App *pApp){
 	pApp->gpu_thread = create_gpu_thread(pApp->gpu_device, pApp->queue_family_index);
 	pApp->graphics_queue = create_graphics_queue(pApp);	
 	pApp->swapchain = create_swapchain(pApp);
-	create_swapchain_images(pApp);
+	create_swapchain_images(pApp, pApp->swapchain);
 	sync(pApp);
 	pApp->command_pool = create_command_pool(pApp);
 	pApp->command_buffers = create_command_buffers(pApp, pApp->command_pool);
