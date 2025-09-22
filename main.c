@@ -565,12 +565,12 @@ pApp->vkCmdEndRendering(command_buffers[i]);
 	return command_buffers;
 }
 void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
-    u32 image_index = 0;
+    u32 image_index ;
     VK_CHECK(vkAcquireNextImageKHR(
         pApp->gpu_thread,
         pApp->swapchain,
         UINT64_MAX,
-        pApp->image_available_semaphore[0],
+        pApp->image_available_semaphore[image_index],
         VK_NULL_HANDLE,
         &image_index));
 
@@ -612,9 +612,22 @@ void init_vulkan(App *pApp){
 	pApp->queue_family_index = find_gpu_queue_family_index(pApp->gpu_device, pApp->surface);
 	pApp->gpu_thread = create_gpu_thread(pApp->gpu_device, pApp->queue_family_index.graphics_index);
 	volkLoadDevice(pApp->gpu_thread);
-	pApp->vkCmdBeginRendering = (PFN_vkCmdBeginRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdBeginRendering");
-	pApp->vkCmdEndRendering = (PFN_vkCmdEndRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdEndRendering");
+	if(pApp->gpu_thread==NULL){
+		printf("[warning]gpu thread(logical device) is null\n");
+	}
 
+	pApp->vkCmdBeginRendering =  
+		(PFN_vkCmdBeginRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdBeginRenderingKHR");
+	if(pApp->vkCmdBeginRendering==NULL){
+		printf("[warning]begin rendering is null\n");
+	}
+
+	pApp->vkCmdEndRendering =
+		(PFN_vkCmdEndRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdEndRenderingKHR");
+	pApp->vkCmdEndRendering = (PFN_vkCmdEndRendering)vkGetDeviceProcAddr(pApp->gpu_thread, "vkCmdEndRenderingKHR");
+	if(pApp->vkCmdEndRendering==NULL){
+		printf("[warning]end rendering is null\n");
+	}
 	if (pApp->vkCmdBeginRendering == NULL || pApp->vkCmdEndRendering == NULL) {
 		printf("Failed to load dynamic rendering function pointers\n");
 		exit(1);
