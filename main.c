@@ -462,10 +462,14 @@ void sync(App *pApp){
     };
 pApp->image_available_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
 pApp->render_complete_semaphore = malloc(sizeof(VkSemaphore) * pApp->swapchain_image_count);
-
+/**
 for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
     VK_CHECK(vkCreateSemaphore(pApp->gpu_thread, &semaphore_info, NULL, &pApp->image_available_semaphore[i]));
     VK_CHECK(vkCreateSemaphore(pApp->gpu_thread, &semaphore_info, NULL, &pApp->render_complete_semaphore[i]));
+}**/
+	for (uint32_t i = 0; i < pApp->swapchain_image_count; i++) {
+    pApp->image_available_semaphore[i] = create_semaphore(pApp->gpu_thread);
+    pApp->render_complete_semaphore[i] = create_semaphore(pApp->gpu_thread);
 }
 	printf("sync is on.........\n");
 }
@@ -566,11 +570,12 @@ pApp->vkCmdEndRendering(command_buffers[i]);
 }
 void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
     u32 image_index ;
+	u32 frame_index = 0;
     VK_CHECK(vkAcquireNextImageKHR(
         pApp->gpu_thread,
         pApp->swapchain,
         UINT64_MAX,
-        pApp->image_available_semaphore[image_index],
+        pApp->image_available_semaphore[frame_index],
         VK_NULL_HANDLE,
         &image_index));
 
