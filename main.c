@@ -64,6 +64,10 @@ typedef struct App {
 	PFN_vkCmdBeginRendering vkCmdBeginRendering;
 	PFN_vkCmdEndRendering vkCmdEndRendering;
 
+	VkPipeline pipeline;
+	VkPipelineLayout pipeline_layout;
+	
+
 } App;
 
 void init_window(App *pApp);
@@ -519,6 +523,139 @@ VkCommandBuffer* create_command_buffers(App *pApp, VkCommandPool command_pool) {
 	}
     return buffers;
 }
+
+
+VkShaderModule load_shader_module(VkDevice device, const char* path) {
+    FILE* f = fopen(path, "rb");
+    assert(f && "Failed to open shader file");
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    rewind(f);
+
+    char* buffer = malloc(size);
+    fread(buffer, 1, size, f);
+    fclose(f);
+
+    VkShaderModuleCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = size,
+        .pCode = (const uint32_t*)buffer,
+    };
+
+    VkShaderModule module;
+    VK_CHECK(vkCreateShaderModule(device, &info, NULL, &module));
+    free(buffer);
+    return module;
+}
+
+VkPipeline create_graphics_pipeline(App *pApp){
+	VkPipeline pipeline; 
+    VkShaderModule vert = load_shader_module(pApp->gpu_thread, "tri.vert.spv");
+    VkShaderModule frag = load_shader_module(pApp->gpu_thread, "tri.frag.spv");
+
+    VkPipelineShaderStageCreateInfo shader_stages[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = vert,
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = frag,
+            .pName = "main",
+        },
+    };
+
+
+	// all stages
+    VkPipelineVertexInputStateCreateInfo vertex_input = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    };
+
+    VkViewport viewport = {
+        .x = 0, .y = 0,
+        .width = (float)pApp->width,
+        .height = (float)pApp->height,
+        .minDepth = 0.0f, .maxDepth = 1.0f,
+    };
+
+    VkRect2D scissor = {
+        .offset = {0, 0},
+        .extent = {pApp->width, pApp->height},
+    };
+
+    VkPipelineViewportStateCreateInfo viewport_state = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1, .pViewports = &viewport,
+        .scissorCount = 1, .pScissors = &scissor,
+    };
+
+    VkPipelineRasterizationStateCreateInfo rasterizer = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = VK_CULL_MODE_BACK_BIT,
+        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+
+    VkPipelineMultisampleStateCreateInfo multisampling = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+
+    VkPipelineColorBlendAttachmentState blend_attachment = {
+        .colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+    };
+
+    VkPipelineColorBlendStateCreateInfo color_blend = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &blend_attachment,
+    };
+
+    VkPipelineLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+    };
+    VK_CHECK(vkCreatePipelineLayout(pApp->gpu_thread, &layout_info, NULL, &pApp->pipeline_layout));
+
+    VkPipelineRenderingCreateInfo rendering_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &pApp->swapchain_format,
+    };
+	
+	VkGraphicsPipelineCreateInfo pipeline_info = {
+		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+		.renderPass = VK_NULL_HANDLE,
+		      .pNext = &rendering_info,
+        .stageCount = 2,
+        .pStages = shader_stages,
+        .pVertexInputState = &vertex_input,
+        .pInputAssemblyState = &input_assembly,
+        .pViewportState = &viewport_state,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState = &multisampling,
+        .pColorBlendState = &color_blend,
+        .layout = pApp->pipeline_layout,
+
+	};
+ VK_CHECK(vkCreateGraphicsPipelines(
+        pApp->gpu_thread, VK_NULL_HANDLE, 1, &pipeline_info, NULL, &pipeline));
+
+    vkDestroyShaderModule(pApp->gpu_thread, vert, NULL);
+    vkDestroyShaderModule(pApp->gpu_thread, frag, NULL);
+
+	return pipeline;
+}
 VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buffers) {	
     for (u32 i = 0; i < pApp->swapchain_image_count; i++) {
         VkCommandBufferBeginInfo begin_info = {
@@ -575,6 +712,9 @@ VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buff
 pApp->vkCmdBeginRendering(command_buffers[i], &render_info);
 
         // TODO: pipeline + vkCmdDraw here later
+vkCmdBindPipeline(command_buffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pApp->pipeline);
+vkCmdDraw(command_buffers[i], 3, 1, 0, 0);
+	
 pApp->vkCmdEndRendering(command_buffers[i]);
 VkImageMemoryBarrier present_barrier = {
     .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -612,17 +752,6 @@ vkCmdPipelineBarrier(
 	return command_buffers;
 }
 
-VkPipeline create_graphics_pipeline(App *pApp){
-	VkPipeline pipeline;
-
-	VkGraphicsPipelineCreateInfo create_info = {
-		.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-		.renderPass = VK_NULL_HANDLE,
-
-	};
-	vkCreateGraphicsPipelines(pApp->gpu_thread,VK_NULL_HANDLE ,1, &create_info,NULL,&pipeline);
-
-}
 
 static uint32_t current_frame = 0;
 
@@ -704,7 +833,9 @@ void init_vulkan(App *pApp){
 	sync(pApp);
 	pApp->command_pool = create_command_pool(pApp);
 	pApp->command_buffers = create_command_buffers(pApp, pApp->command_pool);
+	pApp->pipeline = create_graphics_pipeline(pApp);	
 	pApp->command_buffers = record_command_buffers(pApp, pApp->command_buffers);
+	
 }
 void main_loop(App *pApp){
 		while (!glfwWindowShouldClose(pApp->window)) {
@@ -785,7 +916,15 @@ if (pApp->gpu_thread != VK_NULL_HANDLE) {
         free(pApp->swapchain_images);
         pApp->swapchain_images = NULL;
     }
+if (pApp->pipeline != VK_NULL_HANDLE) {
+    vkDestroyPipeline(pApp->gpu_thread, pApp->pipeline, NULL);
+    pApp->pipeline = VK_NULL_HANDLE;
+}
 
+if (pApp->pipeline_layout != VK_NULL_HANDLE) {
+    vkDestroyPipelineLayout(pApp->gpu_thread, pApp->pipeline_layout, NULL);
+    pApp->pipeline_layout = VK_NULL_HANDLE;
+}
     // Destroy logical device
     if (pApp->gpu_thread != VK_NULL_HANDLE) {
         vkDestroyDevice(pApp->gpu_thread, NULL);
