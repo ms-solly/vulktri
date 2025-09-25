@@ -17,7 +17,7 @@
 #include <GLFW/glfw3native.h>
 //#include "ext/fast_obj/fast_obj.h"
 #include "ext/volk/volk.h"
-//#include "ext/cglm/include/cglm/cglm.h"
+#include "ext/cglm/include/cglm/cglm.h"
 // Nuklear GUI includes
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
