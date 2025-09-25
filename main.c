@@ -109,10 +109,11 @@ VkSemaphore create_semaphore(VkDevice device) {
 }
 VkImageView create_image_view(App *pApp);
 VkPipeline create_graphics_pipeline(App *pApp);
-void create_uniform_buffer(App *pApp);
-void create_desriptor_set_layoout(App *pApp);
-void create_descriptor_pool_and_set(App *pApp);
-void create_pipeline_layout(App *pApp);
+VkBuffer create_uniform_buffer(App *pApp);
+VkDescriptorSetLayout create_desriptor_set_layout(App *pApp);
+VkDescriptorPool create_descriptor_pool(App *pApp);
+VkDescriptorSet create_descriptor_set(App *pApp);
+VkPipelineLayout create_pipeline_layout(App *pApp);
 
 int main() {
 	 App app = {0};
@@ -521,17 +522,18 @@ uint32_t find_memory_type(App *pApp, uint32_t typeFilter, VkMemoryPropertyFlags 
     exit(1);
 }
 
-void create_uniform_buffer(App *pApp) {
+VkBuffer create_uniform_buffer(App *pApp) {
+	VkBuffer uniform_buffer;
     VkBufferCreateInfo buffer_info = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = sizeof(Uniform_Buffer_Object),
         .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
-    VK_CHECK(vkCreateBuffer(pApp->gpu_thread, &buffer_info, NULL, &pApp->uniform_buffer));
+    VK_CHECK(vkCreateBuffer(pApp->gpu_thread, &buffer_info, NULL, &uniform_buffer));
 
     VkMemoryRequirements mem_req;
-    vkGetBufferMemoryRequirements(pApp->gpu_thread, pApp->uniform_buffer, &mem_req);
+    vkGetBufferMemoryRequirements(pApp->gpu_thread, uniform_buffer, &mem_req);
 
     VkMemoryAllocateInfo alloc_info = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -541,9 +543,11 @@ void create_uniform_buffer(App *pApp) {
                                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
     };
     VK_CHECK(vkAllocateMemory(pApp->gpu_thread, &alloc_info, NULL, &pApp->uniform_memory));
-    vkBindBufferMemory(pApp->gpu_thread, pApp->uniform_buffer, pApp->uniform_memory, 0);
+    vkBindBufferMemory(pApp->gpu_thread,uniform_buffer, pApp->uniform_memory, 0);
+	return uniform_buffer;
 }
-void create_descriptor_set_layout(App *pApp) {
+VkDescriptorSetLayout create_descriptor_set_layout(App *pApp) {
+	VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorSetLayoutBinding ubo_binding = {
         .binding = 0,
         .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -558,9 +562,11 @@ void create_descriptor_set_layout(App *pApp) {
     };
 
     VK_CHECK(vkCreateDescriptorSetLayout(pApp->gpu_thread, &layout_info, NULL,
-                                         &pApp->descriptor_set_layout));
+                                         &descriptor_set_layout));
+	return descriptor_set_layout;
 }
-void create_descriptor_pool_and_set(App *pApp) {
+VkDescriptorPool create_descriptor_pool(App *pApp) {
+	VkDescriptorPool descriptor_pool;
     VkDescriptorPoolSize pool_size = {
         .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         .descriptorCount = 1,
@@ -572,11 +578,11 @@ void create_descriptor_pool_and_set(App *pApp) {
         .pPoolSizes = &pool_size,
         .maxSets = 1,
     };
-    VK_CHECK(vkCreateDescriptorPool(pApp->gpu_thread, &pool_info, NULL, &pApp->descriptor_pool));
+    VK_CHECK(vkCreateDescriptorPool(pApp->gpu_thread, &pool_info, NULL, &descriptor_pool));
 
     VkDescriptorSetAllocateInfo alloc_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = pApp->descriptor_pool,
+        .descriptorPool = descriptor_pool,
         .descriptorSetCount = 1,
         .pSetLayouts = &pApp->descriptor_set_layout,
     };
@@ -598,6 +604,7 @@ void create_descriptor_pool_and_set(App *pApp) {
     };
 
     vkUpdateDescriptorSets(pApp->gpu_thread, 1, &descriptor_write, 0, NULL);
+	return descriptor_pool;
 }
 
 VkCommandPool create_command_pool(App *pApp) {
@@ -654,7 +661,8 @@ VkShaderModule load_shader_module(VkDevice device, const char* path) {
     free(buffer);
     return module;
 }
-void create_pipeline_layout(App *pApp) {
+VkPipelineLayout create_pipeline_layout(App *pApp) {
+	VkPipelineLayout pipeline_layout;
     VkPipelineLayoutCreateInfo pipeline_layout_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = 1,
@@ -662,10 +670,11 @@ void create_pipeline_layout(App *pApp) {
     };
 
     if (vkCreatePipelineLayout(pApp->gpu_thread, &pipeline_layout_info,
-                               NULL, &pApp->pipeline_layout) != VK_SUCCESS) {
+                               NULL, &pipeline_layout) != VK_SUCCESS) {
         fprintf(stderr, "failed to create pipeline layout!\n");
         exit(1);
     }
+	return pipeline_layout;
 }
 
 VkPipeline create_graphics_pipeline(App *pApp){
@@ -979,11 +988,12 @@ void init_vulkan(App *pApp){
 	pApp->swapchain = create_swapchain(pApp);
 	pApp->swapchain_images=create_swapchain_images(pApp, pApp->swapchain);
 	pApp->swapchain_image_views = create_swapchain_views(pApp);	
-create_uniform_buffer(pApp);
-create_descriptor_set_layout(pApp);
-create_descriptor_pool_and_set(pApp);  // <--- moved earlier
-create_pipeline_layout(pApp);
-pApp->pipeline = create_graphics_pipeline(pApp);
+	pApp->uniform_buffer = create_uniform_buffer(pApp);
+	pApp->descriptor_set_layout = create_descriptor_set_layout(pApp);
+	pApp->descriptor_pool = create_descriptor_pool(pApp); 
+	pApp->descriptor_set = create_descriptor_set(pApp);
+	pApp->pipeline_layout = create_pipeline_layout(pApp);
+	pApp->pipeline = create_graphics_pipeline(pApp);
 	  	
 	sync(pApp);
 	pApp->command_pool = create_command_pool(pApp);
