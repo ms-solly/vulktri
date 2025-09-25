@@ -64,6 +64,7 @@ typedef struct App {
 	VkFence* in_flight_fences;
 
 	VkQueue graphics_queue;
+    VkQueue present_queue;
 	VkCommandPool command_pool;
 	VkCommandBuffer* command_buffers;
 	PFN_vkCmdBeginRendering vkCmdBeginRendering;
@@ -93,6 +94,7 @@ VkPhysicalDevice select_gpu_device(VkInstance instance);
 Queue_Family_Indices find_gpu_queue_family_index(VkPhysicalDevice selected_gpu_device, VkSurfaceKHR surface);
 VkDevice create_gpu_thread(VkPhysicalDevice selected_physical_device, u32 queue_family_index);
 VkQueue create_graphics_queue(App *pApp);
+VkQueue create_present_queue(App *pApp);
 VkSwapchainKHR create_swapchain(App *pApp);
 void sync(App *pApp);
 VkImage *create_swapchain_images(App *pApp, VkSwapchainKHR swapchain);
@@ -110,9 +112,8 @@ VkSemaphore create_semaphore(VkDevice device) {
 VkImageView create_image_view(App *pApp);
 VkPipeline create_graphics_pipeline(App *pApp);
 VkBuffer create_uniform_buffer(App *pApp);
-VkDescriptorSetLayout create_desriptor_set_layout(App *pApp);
+VkDescriptorSetLayout create_descriptor_set_layout(App *pApp);
 VkDescriptorPool create_descriptor_pool(App *pApp);
-VkDescriptorSet create_descriptor_set(App *pApp);
 VkPipelineLayout create_pipeline_layout(App *pApp);
 
 int main() {
@@ -368,6 +369,11 @@ VkQueue create_graphics_queue(App *pApp){
 	VkQueue queue;
 	vkGetDeviceQueue(pApp->gpu_thread, pApp->queue_family_index.graphics_index, 0, &queue);
 	return queue;
+}
+VkQueue create_present_queue(App *pApp){
+    VkQueue queue;
+    vkGetDeviceQueue(pApp->gpu_thread, pApp->queue_family_index.present_index, 0, &queue);
+    return queue;
 }
 VkSwapchainKHR create_swapchain(App *pApp){
 	Queue_Family_Indices queue_family_index = find_gpu_queue_family_index(pApp->gpu_device, pApp->surface);
@@ -679,8 +685,8 @@ VkPipelineLayout create_pipeline_layout(App *pApp) {
 
 VkPipeline create_graphics_pipeline(App *pApp){
 	VkPipeline pipeline; 
-    VkShaderModule vert = load_shader_module(pApp->gpu_thread, "tri.vert.spv");
-    VkShaderModule frag = load_shader_module(pApp->gpu_thread, "tri.frag.spv");
+    VkShaderModule vert = load_shader_module(pApp->gpu_thread, "shaders/tri.vert.spv");
+    VkShaderModule frag = load_shader_module(pApp->gpu_thread, "shaders/tri.frag.spv");
 
     VkPipelineShaderStageCreateInfo shader_stages[] = {
         {
@@ -701,6 +707,10 @@ VkPipeline create_graphics_pipeline(App *pApp){
 	// all stages
     VkPipelineVertexInputStateCreateInfo vertex_input = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        .vertexBindingDescriptionCount = 0,
+        .pVertexBindingDescriptions = NULL,
+        .vertexAttributeDescriptionCount = 0,
+        .pVertexAttributeDescriptions = NULL,
     };
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly = {
@@ -729,8 +739,8 @@ VkPipeline create_graphics_pipeline(App *pApp){
     VkPipelineRasterizationStateCreateInfo rasterizer = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .polygonMode = VK_POLYGON_MODE_FILL,
-        .cullMode = VK_CULL_MODE_BACK_BIT,
-        .frontFace = VK_FRONT_FACE_CLOCKWISE,
+    .cullMode = VK_CULL_MODE_NONE,
+    .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .lineWidth = 1.0f,
     };
 
@@ -743,6 +753,7 @@ VkPipeline create_graphics_pipeline(App *pApp){
         .colorWriteMask =
             VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+    .blendEnable = VK_FALSE,
     };
 
     VkPipelineColorBlendStateCreateInfo color_blend = {
@@ -750,13 +761,6 @@ VkPipeline create_graphics_pipeline(App *pApp){
         .attachmentCount = 1,
         .pAttachments = &blend_attachment,
     };
-
-    VkPipelineLayoutCreateInfo layout_info = {
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.setLayoutCount = 1,
-		.pSetLayouts = &pApp->descriptor_set_layout,
-    };
-    VK_CHECK(vkCreatePipelineLayout(pApp->gpu_thread, &layout_info, NULL, &pApp->pipeline_layout));
 
     VkPipelineRenderingCreateInfo rendering_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
@@ -796,7 +800,7 @@ VkCommandBuffer *record_command_buffers(App *pApp, VkCommandBuffer* command_buff
 		//transition layoiut 
  VkImageMemoryBarrier barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -913,10 +917,11 @@ void update_uniform_buffer(App *pApp) {
 }
 
 void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
-	update_uniform_buffer(pApp);
-	VK_CHECK(vkWaitForFences(pApp->gpu_thread, 1, &pApp->in_flight_fences[current_frame], VK_TRUE, UINT64_MAX));
+    update_uniform_buffer(pApp);
+    VK_CHECK(vkWaitForFences(pApp->gpu_thread, 1, &pApp->in_flight_fences[current_frame], VK_TRUE, UINT64_MAX));
     VK_CHECK(vkResetFences(pApp->gpu_thread, 1, &pApp->in_flight_fences[current_frame]));
-    u32 image_index ;
+
+    u32 image_index;
     VK_CHECK(vkAcquireNextImageKHR(
         pApp->gpu_thread,
         pApp->swapchain,
@@ -925,8 +930,98 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
         VK_NULL_HANDLE,
         &image_index));
 
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    // Record the command buffer for this image
+    VK_CHECK(vkResetCommandBuffer(command_buffers[image_index], 0));
+    VkCommandBufferBeginInfo begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+    };
+    VK_CHECK(vkBeginCommandBuffer(command_buffers[image_index], &begin_info));
 
+    VkImageMemoryBarrier to_color = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = pApp->swapchain_images[image_index],
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    };
+    vkCmdPipelineBarrier(
+        command_buffers[image_index],
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        0,
+        0, NULL,
+        0, NULL,
+        1, &to_color);
+
+    VkRenderingAttachmentInfo color_attachment = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = pApp->swapchain_image_views[image_index],
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue.color = {{0.1f, 0.2f, 0.4f, 1.0f}},
+    };
+
+    VkRenderingInfo render_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea.offset = (VkOffset2D){0, 0},
+        .renderArea.extent = (VkExtent2D){pApp->width, pApp->height},
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color_attachment,
+    };
+    pApp->vkCmdBeginRendering(command_buffers[image_index], &render_info);
+
+    vkCmdBindPipeline(command_buffers[image_index], VK_PIPELINE_BIND_POINT_GRAPHICS, pApp->pipeline);
+    vkCmdBindDescriptorSets(
+        command_buffers[image_index],
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        pApp->pipeline_layout,
+        0, 1, &pApp->descriptor_set,
+        0, NULL);
+    vkCmdDraw(command_buffers[image_index], 3, 1, 0, 0);
+
+    pApp->vkCmdEndRendering(command_buffers[image_index]);
+
+    VkImageMemoryBarrier to_present = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = pApp->swapchain_images[image_index],
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = 0,
+    };
+    vkCmdPipelineBarrier(
+        command_buffers[image_index],
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        0,
+        0, NULL,
+        0, NULL,
+        1, &to_present);
+
+    VK_CHECK(vkEndCommandBuffer(command_buffers[image_index]));
+
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit_info = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount = 1,
@@ -939,7 +1034,6 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
     };
     VK_CHECK(vkQueueSubmit(pApp->graphics_queue, 1, &submit_info, pApp->in_flight_fences[current_frame]));
 
-
     VkPresentInfoKHR present_info = {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
@@ -949,10 +1043,8 @@ void draw_frame(App *pApp, VkCommandBuffer* command_buffers) {
         .pImageIndices = &image_index,
     };
 
-    VK_CHECK(vkQueuePresentKHR(pApp->graphics_queue, &present_info));
-current_frame = (current_frame + 1) % pApp->swapchain_image_count;
-
-   // vkQueueWaitIdle(pApp->graphics_queue);
+    VK_CHECK(vkQueuePresentKHR(pApp->present_queue, &present_info));
+    current_frame = (current_frame + 1) % pApp->swapchain_image_count;
 }
 
 void init_vulkan(App *pApp){
@@ -984,27 +1076,28 @@ void init_vulkan(App *pApp){
 		exit(1);
 	}
 	
-	pApp->graphics_queue = create_graphics_queue(pApp);	
-	pApp->swapchain = create_swapchain(pApp);
+	pApp->graphics_queue = create_graphics_queue(pApp); 	
+    pApp->present_queue = create_present_queue(pApp);
+    if (!pApp->queue_family_index.separate_queues) {
+        pApp->present_queue = pApp->graphics_queue;
+    }
+pApp->swapchain = create_swapchain(pApp);
 	pApp->swapchain_images=create_swapchain_images(pApp, pApp->swapchain);
-	pApp->swapchain_image_views = create_swapchain_views(pApp);	
-	pApp->uniform_buffer = create_uniform_buffer(pApp);
+	pApp->swapchain_image_views = create_swapchain_views(pApp); 	
+pApp->uniform_buffer = create_uniform_buffer(pApp);
 	pApp->descriptor_set_layout = create_descriptor_set_layout(pApp);
-	pApp->descriptor_pool = create_descriptor_pool(pApp); 
-	pApp->descriptor_set = create_descriptor_set(pApp);
+	pApp->descriptor_pool = create_descriptor_pool(pApp);
 	pApp->pipeline_layout = create_pipeline_layout(pApp);
 	pApp->pipeline = create_graphics_pipeline(pApp);
 	  	
-	sync(pApp);
+sync(pApp);
 	pApp->command_pool = create_command_pool(pApp);
-	pApp->command_buffers = create_command_buffers(pApp, pApp->command_pool);
-	//pApp->pipeline = create_graphics_pipeline(pApp);	
-	pApp->command_buffers = record_command_buffers(pApp, pApp->command_buffers);
-	
-update_uniform_buffer(pApp);  // <--- init uniform before recording
-pApp->command_buffers = record_command_buffers(pApp, pApp->command_buffers);
+    pApp->command_buffers = create_command_buffers(pApp, pApp->command_pool);
+    
+    update_uniform_buffer(pApp);  // <--- init uniform
 	
 }
+
 void main_loop(App *pApp){
 		while (!glfwWindowShouldClose(pApp->window)) {
 			glfwPollEvents();
@@ -1016,10 +1109,22 @@ void cleanup(App *pApp){
 if (pApp->gpu_thread != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(pApp->gpu_thread);
     }
+    if (pApp->uniform_buffer) {
+        vkDestroyBuffer(pApp->gpu_thread, pApp->uniform_buffer, NULL);
+    }
+    if (pApp->uniform_memory) {
+        vkFreeMemory(pApp->gpu_thread, pApp->uniform_memory, NULL);
+    }
+    if (pApp->descriptor_pool) {
+        vkDestroyDescriptorPool(pApp->gpu_thread, pApp->descriptor_pool, NULL);
+    }
+    if (pApp->descriptor_set_layout) {
+        vkDestroyDescriptorSetLayout(pApp->gpu_thread, pApp->descriptor_set_layout, NULL);
+    }
 
     // Destroy command buffers (they're allocated from pool, so just free them)
     if (pApp->command_buffers) {
-        vkFreeCommandBuffers(pApp->gpu_thread, pApp->command_pool, 
+        vkFreeCommandBuffers(pApp->gpu_thread, pApp->command_pool,
                            pApp->swapchain_image_count, pApp->command_buffers);
         free(pApp->command_buffers);
         pApp->command_buffers = NULL;
